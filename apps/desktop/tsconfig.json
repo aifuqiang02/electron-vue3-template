@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@ai-ssh/shared/*": ["../../packages/shared/src/*"]
+    },
+    "types": ["electron", "node"],
+    "lib": ["DOM", "ES2020"]
+  },
+  "include": [
+    "src/**/*",
+    "electron/**/*",
+    "*.config.*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-electron",
+    "release"
+  ]
+}

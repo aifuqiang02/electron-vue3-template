@@ -1,0 +1,530 @@
+<template>
+  <div class="vscode-app h-screen flex flex-col bg-vscode-bg-light text-vscode-fg select-none">
+    <!-- 标题栏 -->
+    <AppTitleBar v-if="!isFullscreen" class="vscode-titlebar" />
+    
+    <!-- 主内容区 -->
+    <div class="flex flex-1 overflow-hidden">
+      <!-- 活动栏 -->
+      <div class="vscode-activitybar w-12 bg-vscode-bg-light border-r border-vscode-border flex flex-col">
+        <div class="flex-1 py-2">
+          <div 
+            v-for="item in activityBarItems" 
+            :key="item.id"
+            @click="setActiveView(item.id)"
+            :class="['vscode-activity-item', { 'active': activeView === item.id }]"
+            :title="item.tooltip"
+          >
+            <i :class="item.icon"></i>
+          </div>
+        </div>
+        <div class="py-2">
+          <div class="vscode-activity-item" @click="openSettings" title="设置">
+            <i class="bi bi-gear"></i>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 侧边栏 -->
+      <div 
+        v-if="showSidebar" 
+        class="vscode-sidebar bg-vscode-bg-light border-r border-vscode-border flex-shrink-0"
+        :style="{ width: sidebarWidth + 'px' }"
+      >
+        <AppSidebar :active-view="activeView" />
+      </div>
+      
+      <!-- 左侧拖拽分割条 -->
+      <div 
+        v-if="showSidebar"
+        class="vscode-splitter vscode-splitter-vertical"
+        @mousedown="startLeftResize"
+      ></div>
+      
+      <!-- 编辑器区域 -->
+      <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+        <!-- 标签栏 -->
+        <div class="vscode-tab-bar bg-vscode-bg-light border-b border-vscode-border flex" style="height: 37px;">
+          <div 
+            v-for="tab in openTabs" 
+            :key="tab.id"
+            @click="setActiveTab(tab.id)"
+            :class="['vscode-tab', { 'active': activeTab === tab.id }]"
+          >
+            <i :class="tab.icon" class="mr-1"></i>
+            <span>{{ tab.name }}</span>
+            <button @click.stop="closeTab(tab.id)" class="vscode-tab-close">
+              <i class="bi bi-x"></i>
+            </button>
+          </div>
+        </div>
+        
+        <!-- 主内容 -->
+        <main class="flex-1 overflow-hidden bg-vscode-bg-light">
+          <router-view />
+        </main>
+      </div>
+      
+      <!-- 右侧拖拽分割条 -->
+      <div 
+        v-if="showRightPanel"
+        class="vscode-splitter vscode-splitter-vertical"
+        @mousedown="startRightResize"
+      ></div>
+      
+      <!-- 右侧面板 (Cline功能区域) -->
+      <div 
+        v-if="showRightPanel" 
+        class="vscode-right-panel bg-vscode-bg-light border-l border-vscode-border flex flex-col flex-shrink-0"
+        :style="{ width: rightPanelWidth + 'px' }"
+      >
+        <RightPanel />
+      </div>
+      
+      <!-- 右侧面板切换按钮 -->
+      <div class="vscode-activitybar-right w-12 bg-vscode-bg-light border-l border-vscode-border flex flex-col" v-if="!showRightPanel">
+        <div class="flex-1 py-2">
+          <div 
+            class="vscode-activity-item"
+            @click="toggleRightPanel"
+            title="AI助手 (Cline)"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM7 3v2H5v1h2v2h1V6h2V5H8V3H7z"/>
+              <path d="M8 11.5a.5.5 0 0 1-.5-.5V9.5a.5.5 0 0 1 1 0V11a.5.5 0 0 1-.5.5z"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 状态栏 -->
+    <AppStatusBar v-if="!isFullscreen" class="vscode-statusbar" />
+    
+    <!-- 全局模态框 -->
+    <GlobalModals />
+    
+    <!-- 通知组件 -->
+    <NotificationContainer />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
+import { useAppStore } from '@/stores/app'
+import { useThemeStore } from '@/stores/theme'
+import AppTitleBar from '@/components/layout/AppTitleBar.vue'
+import AppSidebar from '@/components/layout/AppSidebar.vue'
+import AppStatusBar from '@/components/layout/AppStatusBar.vue'
+import RightPanel from '@/components/layout/RightPanel.vue'
+import GlobalModals from '@/components/common/GlobalModals.vue'
+import NotificationContainer from '@/components/common/NotificationContainer.vue'
+
+const appStore = useAppStore()
+const themeStore = useThemeStore()
+
+// 响应式数据
+const isFullscreen = ref(false)
+const showSidebar = ref(true)
+const showRightPanel = ref(true)
+const activeView = ref('ssh')
+const activeTab = ref('welcome')
+
+// 面板尺寸
+const sidebarWidth = ref(256) // 默认256px
+const rightPanelWidth = ref(500) // 默认500px
+
+// 拖拽状态
+const isResizing = ref(false)
+const resizeType = ref<'left' | 'right' | null>(null)
+const startX = ref(0)
+const startWidth = ref(0)
+
+// 活动栏项目
+const activityBarItems = ref([
+  { id: 'ssh', icon: 'bi bi-hdd-network', tooltip: 'SSH 连接' },
+  { id: 'chat', icon: 'bi bi-chat-dots', tooltip: 'AI 聊天' },
+  { id: 'files', icon: 'bi bi-folder', tooltip: '文件管理' },
+  { id: 'terminal', icon: 'bi bi-terminal', tooltip: '终端' },
+  { id: 'history', icon: 'bi bi-clock-history', tooltip: '历史记录' }
+])
+
+// 打开的标签
+const openTabs = ref([
+  { id: 'welcome', name: '欢迎', icon: 'bi bi-house', path: '/' },
+  { id: 'ssh', name: 'SSH 连接', icon: 'bi bi-hdd-network', path: '/ssh' }
+])
+
+// 方法
+const setActiveView = (viewId: string) => {
+  activeView.value = viewId
+  // 根据视图切换路由
+  const routes: Record<string, string> = {
+    ssh: '/ssh',
+    chat: '/chat',
+    files: '/files',
+    terminal: '/terminal',
+    history: '/history'
+  }
+  if (routes[viewId]) {
+    // 这里可以添加路由跳转逻辑
+  }
+}
+
+const setActiveTab = (tabId: string) => {
+  activeTab.value = tabId
+  const tab = openTabs.value.find(t => t.id === tabId)
+  if (tab) {
+    // 路由跳转逻辑
+  }
+}
+
+const closeTab = (tabId: string) => {
+  const index = openTabs.value.findIndex(t => t.id === tabId)
+  if (index > -1 && openTabs.value.length > 1) {
+    openTabs.value.splice(index, 1)
+    if (activeTab.value === tabId) {
+      // 切换到相邻标签
+      const newIndex = Math.min(index, openTabs.value.length - 1)
+      activeTab.value = openTabs.value[newIndex].id
+    }
+  }
+}
+
+const openSettings = () => {
+  // 打开设置页面
+  appStore.openSettings()
+}
+
+const toggleRightPanel = () => {
+  showRightPanel.value = !showRightPanel.value
+}
+
+const closeRightPanel = () => {
+  showRightPanel.value = false
+}
+
+// 拖拽调整大小功能
+const startLeftResize = (event: MouseEvent) => {
+  isResizing.value = true
+  resizeType.value = 'left'
+  startX.value = event.clientX
+  startWidth.value = sidebarWidth.value
+  document.body.classList.add('resizing')
+  document.addEventListener('mousemove', handlePanelResize)
+  document.addEventListener('mouseup', stopResize)
+  event.preventDefault()
+}
+
+const startRightResize = (event: MouseEvent) => {
+  isResizing.value = true
+  resizeType.value = 'right'
+  startX.value = event.clientX
+  startWidth.value = rightPanelWidth.value
+  document.body.classList.add('resizing')
+  document.addEventListener('mousemove', handlePanelResize)
+  document.addEventListener('mouseup', stopResize)
+  event.preventDefault()
+}
+
+const handlePanelResize = (event: MouseEvent) => {
+  if (!isResizing.value) return
+  
+  const deltaX = event.clientX - startX.value
+  
+  if (resizeType.value === 'left') {
+    // 左侧侧边栏调整
+    const newWidth = startWidth.value + deltaX
+    sidebarWidth.value = Math.max(200, Math.min(600, newWidth)) // 限制在200-600px之间
+  } else if (resizeType.value === 'right') {
+    // 右侧面板调整
+    const newWidth = startWidth.value - deltaX // 右侧面板向左拖拽时减小宽度
+    rightPanelWidth.value = Math.max(250, Math.min(600, newWidth)) // 限制在250-600px之间
+  }
+}
+
+const stopResize = () => {
+  isResizing.value = false
+  resizeType.value = null
+  document.body.classList.remove('resizing')
+  document.removeEventListener('mousemove', handlePanelResize)
+  document.removeEventListener('mouseup', stopResize)
+}
+
+// 键盘快捷键处理
+const handleKeydown = (event: KeyboardEvent) => {
+  // Ctrl/Cmd + B 切换侧边栏
+  if ((event.ctrlKey || event.metaKey) && event.key === 'b') {
+    event.preventDefault()
+    showSidebar.value = !showSidebar.value
+  }
+  
+  // F11 切换全屏
+  if (event.key === 'F11') {
+    event.preventDefault()
+    isFullscreen.value = !isFullscreen.value
+    if (window.electronAPI) {
+      window.electronAPI.toggleFullscreen()
+    }
+  }
+  
+  // Ctrl/Cmd + , 打开设置
+  if ((event.ctrlKey || event.metaKey) && event.key === ',') {
+    event.preventDefault()
+    appStore.openSettings()
+  }
+
+  // F12 切换开发者工具
+  if (event.key === 'F12') {
+    event.preventDefault()
+    if (window.electronAPI && window.electronAPI.toggleDevTools) {
+      window.electronAPI.toggleDevTools()
+        .then((opened: boolean) => {
+          console.log('DevTools toggled via Vue:', opened ? 'opened' : 'closed')
+        })
+        .catch((error: any) => {
+          console.error('Failed to toggle DevTools:', error)
+        })
+    }
+  }
+}
+
+// 窗口大小变化处理
+const handleResize = () => {
+  // 响应式布局调整
+  if (window.innerWidth < 768) {
+    showSidebar.value = false
+  }
+}
+
+onMounted(() => {
+  // 初始化应用
+  appStore.initialize()
+  themeStore.initialize()
+  
+  // 绑定事件监听器
+  document.addEventListener('keydown', handleKeydown)
+  window.addEventListener('resize', handleResize)
+  window.addEventListener('close-right-panel', closeRightPanel)
+  
+  // 监听全屏状态变化
+  if (window.electronAPI) {
+    window.electronAPI.onFullscreenChange((fullscreen: boolean) => {
+      isFullscreen.value = fullscreen
+    })
+  }
+})
+
+onUnmounted(() => {
+  // 清理事件监听器
+  document.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('resize', handleResize)
+  window.removeEventListener('close-right-panel', closeRightPanel)
+})
+</script>
+
+<style scoped>
+.vscode-app {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+}
+
+/* 活动栏样式 */
+.vscode-activitybar {
+  background: var(--vscode-bg-light);
+}
+
+.vscode-activity-item {
+  width: 3rem;
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #9ca3af;
+  transition: color 0.15s ease;
+  position: relative;
+}
+
+.vscode-activity-item:hover {
+  color: white;
+}
+
+.vscode-activity-item.active {
+  color: white;
+}
+
+.vscode-activity-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 16px;
+  background: var(--vscode-accent);
+}
+
+.vscode-activity-item i {
+  font-size: 16px;
+}
+
+/* 标签栏样式 */
+.vscode-tab-bar {
+  background: var(--vscode-bg-light);
+}
+
+.vscode-tab {
+  padding: 0 0.75rem;
+  display: flex;
+  align-items: center;
+  font-size: 0.875rem;
+  color: #9ca3af;
+  cursor: pointer;
+  border-top: 2px solid transparent;
+  position: relative;
+  min-width: 120px;
+  max-width: 200px;
+  height: 37px;
+  transition: color 0.15s ease;
+}
+
+.vscode-tab:hover {
+  color: white;
+}
+
+.vscode-tab.active {
+  color: white;
+  border-top-color: #3b82f6;
+  background: var(--vscode-bg);
+}
+
+.vscode-tab:not(.active):hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.vscode-tab span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 0.5rem;
+}
+
+.vscode-tab-close {
+  width: 1rem;
+  height: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  color: #6b7280;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.vscode-tab-close:hover {
+  color: white;
+  background-color: #4b5563;
+}
+
+.vscode-tab:hover .vscode-tab-close {
+  opacity: 1;
+}
+
+.vscode-tab-close i {
+  font-size: 10px;
+}
+
+/* 侧边栏样式 */
+.vscode-sidebar {
+  background: #252526;
+}
+
+/* 状态栏样式 */
+.vscode-statusbar {
+  background: var(--vscode-accent);
+  height: 22px;
+}
+
+/* 标题栏样式 */
+.vscode-titlebar {
+  background: #3c3c3c;
+  height: 30px;
+  -webkit-app-region: drag;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .vscode-sidebar {
+    position: absolute;
+    left: 48px;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* 自定义滚动条 */
+:deep(.scrollbar-thin) {
+  scrollbar-width: thin;
+  scrollbar-color: #424242 #1e1e1e;
+}
+
+:deep(.scrollbar-thin::-webkit-scrollbar) {
+  width: 8px;
+  height: 8px;
+}
+
+:deep(.scrollbar-thin::-webkit-scrollbar-track) {
+  background: #1e1e1e;
+}
+
+:deep(.scrollbar-thin::-webkit-scrollbar-thumb) {
+  background: #424242;
+  border-radius: 0;
+}
+
+:deep(.scrollbar-thin::-webkit-scrollbar-thumb:hover) {
+  background: #4f4f4f;
+}
+
+/* 拖拽分割条样式 */
+.vscode-splitter {
+  background: transparent;
+  position: relative;
+  z-index: 10;
+}
+
+.vscode-splitter-vertical {
+  width: 4px;
+  cursor: col-resize;
+  transition: background-color 0.15s ease;
+}
+
+.vscode-splitter-vertical:hover {
+  background-color: var(--vscode-accent);
+}
+
+.vscode-splitter-vertical::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  background: transparent;
+}
+
+/* 拖拽时的全局样式 */
+body.resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+</style>
